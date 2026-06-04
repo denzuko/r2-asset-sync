@@ -75,6 +75,54 @@ See [SECURITY.md](SECURITY.md). Key controls:
 - Subresource Integrity (SRI) must be implemented in Hugo templates before
   switching asset delivery to R2 in production — see whitepaper §8.2
 
+## Usage as a GitHub Action
+
+Add to your workflow after the build step:
+
+```yaml
+- name: Sync assets to Cloudflare R2
+  uses: denzuko/r2-asset-sync@v1
+  with:
+    r2-access-key-id:     ${{ secrets.R2_ACCESS_KEY_ID }}
+    r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    r2-account-id:        ${{ secrets.R2_ACCOUNT_ID }}
+    r2-bucket:            your-bucket-name
+    build-dir:            hugo/public          # optional, default: hugo/public
+    cdn-domain:           assets.cdn.example.com  # optional, enables smoke test
+```
+
+### Inputs
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `r2-access-key-id` | Yes | — | R2 API token access key ID |
+| `r2-secret-access-key` | Yes | — | R2 API token secret access key |
+| `r2-account-id` | Yes | — | Cloudflare account ID |
+| `r2-bucket` | Yes | — | R2 bucket name |
+| `build-dir` | No | `hugo/public` | Hugo build output path |
+| `cdn-domain` | No | _(empty)_ | CDN domain for smoke test; skipped if absent |
+| `asset-dirs` | No | `css js fonts images og` | Space-separated asset subdirectories |
+| `favicon-patterns` | No | `favicon* apple-touch* site.webmanifest` | Root-level asset globs |
+
+### Outputs
+
+| Output | Description |
+|--------|-------------|
+| `endpoint` | R2 S3-compatible endpoint URL used |
+| `objects-synced` | Number of objects uploaded or updated |
+
+### Minimal required secrets
+
+```sh
+gh secret set R2_ACCESS_KEY_ID     --body "<access key>"
+gh secret set R2_SECRET_ACCESS_KEY --body "<secret key>"
+gh secret set R2_ACCOUNT_ID        --body "<account id>"
+```
+
+---
+
+## Usage as a standalone script
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Patches via pull request.

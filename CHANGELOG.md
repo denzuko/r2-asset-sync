@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-06-03
+
+### Added
+- `action.yml`: composite GitHub Action for GitHub Marketplace
+  - Inputs: r2-access-key-id, r2-secret-access-key, r2-account-id,
+    r2-bucket, build-dir, cdn-domain, asset-dirs, favicon-patterns
+  - Outputs: endpoint, objects-synced
+  - Branding: upload-cloud icon, orange color
+- `r2_sync.sh`: ASSET_DIRS and FAVICON_PATTERNS env vars for configurable
+  asset directory lists and favicon glob patterns — used by action inputs,
+  backward-compatible with standalone usage (defaults unchanged)
+- CI workflow updated: lint job validates action.yml; action-smoke job tests
+  the composite action with mocked AWS CLI without live credentials;
+  e2e job tests via `uses: ./` against live R2 when secrets present
+- README: GitHub Action usage section with inputs/outputs table
+
 ## [0.1.0] - 2026-06-03
 
 ### Added
