@@ -1,0 +1,35 @@
+---
+galaxy_info:
+  role_name: r2_asset_sync
+  author: denzuko
+  description: >
+    Sync Hugo static site assets to Cloudflare R2 via the S3-compatible
+    endpoint. Sets Cache-Control headers per asset type, deletes stale
+    objects, and optionally configures Cloudflare Transform Rules for
+    AI crawler signal headers.
+  license: BSD-2-Clause
+  min_ansible_version: "2.12"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - focal
+        - jammy
+        - noble
+    - name: Debian
+      versions:
+        - bullseye
+        - bookworm
+    - name: EL
+      versions:
+        - "8"
+        - "9"
+  galaxy_tags:
+    - cloudflare
+    - r2
+    - cdn
+    - hugo
+    - deployment
+    - selfhosted
+    - privacy
+
+dependencies: []

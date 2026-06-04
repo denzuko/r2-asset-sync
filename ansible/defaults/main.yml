@@ -1,0 +1,38 @@
+---
+# defaults/main.yml — r2-asset-sync role defaults
+
+# Required — no defaults (must be set by caller or vault)
+# r2_access_key_id: ""
+# r2_secret_access_key: ""
+# r2_account_id: ""
+# r2_bucket: ""
+# r2_build_dir: ""
+
+# Optional CDN domain for smoke test. Skipped if empty.
+r2_cdn_domain: ""
+
+# Asset subdirectories to sync with immutable Cache-Control.
+r2_asset_dirs: "css js fonts images og"
+
+# Root-level asset glob patterns with 24-hour Cache-Control.
+r2_favicon_patterns: "favicon* apple-touch* site.webmanifest"
+
+# Path where r2_sync.sh is copied on the target host.
+r2_script_dest: "/usr/local/bin/r2_sync.sh"
+
+# Whether to use become (sudo) for pip install.
+r2_become: false
+
+# Show sync output in Ansible output.
+r2_verbose: true
+
+# Suppress credential values in Ansible logs.
+r2_no_log: true
+
+# Cloudflare Transform Rules — set X-Robots-Tag, X-TDM-Reservation,
+# Content-Signal on CDN asset responses. Requires r2_cloudflare_zone_id
+# and r2_cloudflare_api_token.
+r2_enable_ai_signals: false
+r2_cloudflare_zone_id: ""
+r2_cloudflare_api_token: ""
+r2_content_signal: "ai-train=no; search=no"

@@ -1,0 +1,62 @@
+---
+# cloudflare_headers.yml — configure AI crawler signal headers via Cloudflare API
+# Only runs when r2_enable_ai_signals: true and r2_cloudflare_zone_id is set
+
+- name: Check for existing AI signals ruleset
+  ansible.builtin.uri:
+    url: "https://api.cloudflare.com/client/v4/zones/{{ r2_cloudflare_zone_id }}/rulesets"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ r2_cloudflare_api_token }}"
+      Content-Type: application/json
+    status_code: 200
+  register: existing_rulesets
+  no_log: "{{ r2_no_log }}"
+
+- name: Set AI signals ruleset fact
+  ansible.builtin.set_fact:
+    r2_ai_ruleset: >-
+      {{
+        existing_rulesets.json.result
+        | selectattr('name', 'equalto', 'R2 asset AI crawler signals')
+        | list
+        | first
+        | default({})
+      }}
+
+- name: Create AI signals Transform Rule
+  ansible.builtin.uri:
+    url: >-
+      {{
+        'https://api.cloudflare.com/client/v4/zones/' + r2_cloudflare_zone_id +
+        '/rulesets' +
+        (('/' + r2_ai_ruleset.id) if r2_ai_ruleset.id is defined else '')
+      }}
+    method: "{{ 'PUT' if r2_ai_ruleset.id is defined else 'POST' }}"
+    headers:
+      Authorization: "Bearer {{ r2_cloudflare_api_token }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      name: "R2 asset AI crawler signals"
+      phase: "http_response_headers_transform"
+      kind: "zone"
+      rules:
+        - description: "AI crawler headers on R2 CDN assets"
+          expression: "(http.host eq \"{{ r2_cdn_domain }}\")"
+          action: "rewrite"
+          enabled: true
+          action_parameters:
+            headers:
+              - name: "X-Robots-Tag"
+                operation: "set"
+                value: "noai, noimageai"
+              - name: "X-TDM-Reservation"
+                operation: "set"
+                value: "1"
+              - name: "Content-Signal"
+                operation: "set"
+                value: "{{ r2_content_signal }}"
+    status_code: [200, 201]
+  no_log: "{{ r2_no_log }}"
+  when: r2_cdn_domain | length > 0
