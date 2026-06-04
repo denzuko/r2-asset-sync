@@ -1,0 +1,42 @@
+---
+- name: Test r2_asset_sync role
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    r2_access_key_id:     "{{ lookup('env', 'R2_ACCESS_KEY_ID') }}"
+    r2_secret_access_key: "{{ lookup('env', 'R2_SECRET_ACCESS_KEY') }}"
+    r2_account_id:        "{{ lookup('env', 'R2_ACCOUNT_ID') }}"
+    r2_bucket:            "{{ lookup('env', 'R2_BUCKET') }}"
+    r2_build_dir:         "{{ lookup('env', 'BUILD_DIR') | default('/tmp/test-build') }}"
+    r2_cdn_domain:        "{{ lookup('env', 'CDN_DOMAIN') | default('') }}"
+    r2_verbose:           true
+    r2_no_log:            false   # show all output in test runs
+
+  pre_tasks:
+    - name: Create minimal test build directory
+      ansible.builtin.file:
+        path: "{{ r2_build_dir }}/{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - css
+        - js
+        - fonts
+        - images
+        - og
+
+    - name: Create dummy assets
+      ansible.builtin.copy:
+        content: "body{}"
+        dest: "{{ r2_build_dir }}/css/main.abc123.css"
+        mode: "0644"
+
+    - name: Create dummy favicon
+      ansible.builtin.file:
+        path: "{{ r2_build_dir }}/favicon.ico"
+        state: touch
+        mode: "0644"
+
+  roles:
+    - role: ../

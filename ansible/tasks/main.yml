@@ -1,0 +1,64 @@
+---
+# tasks/main.yml — r2-asset-sync Ansible role
+# Installs dependencies, runs r2_sync.sh, optionally configures
+# Cloudflare Transform Rules via the Cloudflare API.
+
+- name: Validate required variables
+  ansible.builtin.assert:
+    that:
+      - r2_access_key_id | length > 0
+      - r2_secret_access_key | length > 0
+      - r2_account_id | length > 0
+      - r2_bucket | length > 0
+      - r2_build_dir | length > 0
+    fail_msg: >
+      Required variables missing. Set r2_access_key_id, r2_secret_access_key,
+      r2_account_id, r2_bucket, and r2_build_dir.
+  no_log: true
+
+- name: Check build directory exists
+  ansible.builtin.stat:
+    path: "{{ r2_build_dir }}"
+  register: build_dir_stat
+
+- name: Fail if build directory does not exist
+  ansible.builtin.fail:
+    msg: "r2_build_dir '{{ r2_build_dir }}' does not exist"
+  when: not build_dir_stat.stat.exists
+
+- name: Install AWS CLI (via pip)
+  ansible.builtin.pip:
+    name: awscli
+    state: present
+  become: "{{ r2_become }}"
+
+- name: Copy r2_sync.sh to target
+  ansible.builtin.copy:
+    src: "{{ role_path }}/../r2_sync.sh"
+    dest: "{{ r2_script_dest }}"
+    mode: "0755"
+
+- name: Sync assets to Cloudflare R2
+  ansible.builtin.command:
+    cmd: "{{ r2_script_dest }}"
+  environment:
+    R2_ACCESS_KEY_ID:     "{{ r2_access_key_id }}"
+    R2_SECRET_ACCESS_KEY: "{{ r2_secret_access_key }}"
+    R2_ACCOUNT_ID:        "{{ r2_account_id }}"
+    R2_BUCKET:            "{{ r2_bucket }}"
+    BUILD_DIR:            "{{ r2_build_dir }}"
+    CDN_DOMAIN:           "{{ r2_cdn_domain }}"
+    ASSET_DIRS:           "{{ r2_asset_dirs }}"
+    FAVICON_PATTERNS:     "{{ r2_favicon_patterns }}"
+  register: r2_sync_result
+  changed_when: "'sync complete' in r2_sync_result.stdout"
+  no_log: "{{ r2_no_log }}"
+
+- name: Show sync output
+  ansible.builtin.debug:
+    msg: "{{ r2_sync_result.stdout_lines }}"
+  when: r2_verbose
+
+- name: Configure Cloudflare Transform Rules via API
+  ansible.builtin.include_tasks: cloudflare_headers.yml
+  when: r2_enable_ai_signals and r2_cloudflare_zone_id | length > 0
