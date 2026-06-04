@@ -1,7 +1,8 @@
-name: Test and sync
+name: Test action
 
 on:
   push:
+  pull_request:
   workflow_dispatch:
     inputs:
       run_e2e:
@@ -13,24 +14,78 @@ permissions:
   contents: read
 
 jobs:
-  unit:
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get install -y shellcheck
+
+      - name: Shellcheck r2_sync.sh
+        run: shellcheck r2_sync.sh
+
+      - name: Validate action.yml
+        run: |
+          python3 -c "import yaml; yaml.safe_load(open('action.yml'))"
+          echo "action.yml: valid"
+
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    needs: lint
     steps:
       - uses: actions/checkout@v4
 
       - name: Install bats
         run: npm install -g bats
 
-      - name: Install shellcheck
-        run: sudo apt-get install -y shellcheck
-
-      - name: Shellcheck
-        run: shellcheck r2_sync.sh
-
-      - name: Unit tests
+      - name: Run unit tests
         run: bats tests/unit.bats
 
+  action-smoke:
+    name: Action smoke test
+    runs-on: ubuntu-latest
+    needs: unit
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create mock build output
+        run: |
+          mkdir -p test-build/{css,js,fonts,images,og}
+          echo "body{}" > test-build/css/main.abc123.css
+          echo "var x=1;" > test-build/js/app.def456.js
+          touch test-build/favicon.ico
+          touch test-build/site.webmanifest
+
+      - name: Validate missing credentials exit non-zero
+        run: |
+          set +e
+          R2_ACCESS_KEY_ID="" R2_SECRET_ACCESS_KEY="" \
+          R2_ACCOUNT_ID="" R2_BUCKET="" BUILD_DIR="test-build" \
+          sh r2_sync.sh
+          code=$?
+          set -e
+          [ "${code}" -ne 0 ] || (echo "FAIL: expected non-zero" && exit 1)
+          echo "ok: validation rejects missing credentials"
+
+      - name: Run with mocked AWS CLI
+        run: |
+          mkdir -p /tmp/mock-bin
+          printf '#!/bin/sh\necho "$@" >> /tmp/aws-calls.log\n' > /tmp/mock-bin/aws
+          chmod +x /tmp/mock-bin/aws
+          PATH="/tmp/mock-bin:${PATH}" \
+          R2_ACCESS_KEY_ID="k" R2_SECRET_ACCESS_KEY="s" \
+          R2_ACCOUNT_ID="acct" R2_BUCKET="bucket" BUILD_DIR="test-build" \
+          sh r2_sync.sh
+          grep -q "s3 sync" /tmp/aws-calls.log
+          grep -q "immutable" /tmp/aws-calls.log
+          grep -q "acct.r2.cloudflarestorage.com" /tmp/aws-calls.log
+          echo "ok: smoke test passed"
+
   e2e:
+    name: E2E tests (live R2)
     runs-on: ubuntu-latest
     needs: unit
     if: >
@@ -42,7 +97,7 @@ jobs:
       - name: Install bats
         run: npm install -g bats
 
-      - name: Install awscli
+      - name: Install AWS CLI
         run: pip3 install awscli --break-system-packages
 
       - name: E2E tests
@@ -53,3 +108,13 @@ jobs:
           R2_BUCKET:            ${{ secrets.R2_TEST_BUCKET }}
           CDN_DOMAIN:           ${{ secrets.R2_TEST_CDN_DOMAIN }}
         run: bats tests/e2e.bats
+
+      - name: Integration test via action
+        uses: ./
+        with:
+          r2-access-key-id:     ${{ secrets.R2_ACCESS_KEY_ID }}
+          r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          r2-account-id:        ${{ secrets.R2_ACCOUNT_ID }}
+          r2-bucket:            ${{ secrets.R2_TEST_BUCKET }}
+          build-dir:            test-build
+          cdn-domain:           ${{ secrets.R2_TEST_CDN_DOMAIN }}

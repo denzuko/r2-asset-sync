@@ -1,0 +1,87 @@
+name: R2 Asset Sync
+description: >
+  Sync Hugo static site assets to Cloudflare R2 via the S3-compatible endpoint.
+  Sets correct Cache-Control headers per asset type, deletes stale objects,
+  and runs a CDN smoke test on completion.
+
+branding:
+  icon: upload-cloud
+  color: orange
+
+inputs:
+  r2-access-key-id:
+    description: Cloudflare R2 API token access key ID
+    required: true
+
+  r2-secret-access-key:
+    description: Cloudflare R2 API token secret access key
+    required: true
+
+  r2-account-id:
+    description: Cloudflare account ID
+    required: true
+
+  r2-bucket:
+    description: R2 bucket name (e.g. assets-cdn-example-com)
+    required: true
+
+  build-dir:
+    description: Path to Hugo build output directory
+    required: false
+    default: hugo/public
+
+  cdn-domain:
+    description: >
+      Custom CDN domain for smoke test (e.g. assets.cdn.example.com).
+      If omitted the smoke test is skipped.
+    required: false
+    default: ''
+
+  asset-dirs:
+    description: >
+      Space-separated list of asset subdirectories to sync with immutable
+      Cache-Control. Defaults cover standard Hugo output.
+    required: false
+    default: css js fonts images og
+
+  favicon-patterns:
+    description: >
+      Space-separated glob patterns for root-level assets synced with
+      24-hour Cache-Control (not content-hashed).
+    required: false
+    default: 'favicon* apple-touch* site.webmanifest'
+
+outputs:
+  endpoint:
+    description: The R2 S3-compatible endpoint URL used for the sync
+    value: ${{ steps.sync.outputs.endpoint }}
+
+  objects-synced:
+    description: Number of objects uploaded or updated
+    value: ${{ steps.sync.outputs.objects_synced }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install AWS CLI
+      shell: bash
+      run: |
+        if ! command -v aws >/dev/null 2>&1; then
+          pip3 install awscli --break-system-packages --quiet
+        fi
+
+    - name: Sync assets to R2
+      id: sync
+      shell: bash
+      env:
+        R2_ACCESS_KEY_ID:     ${{ inputs.r2-access-key-id }}
+        R2_SECRET_ACCESS_KEY: ${{ inputs.r2-secret-access-key }}
+        R2_ACCOUNT_ID:        ${{ inputs.r2-account-id }}
+        R2_BUCKET:            ${{ inputs.r2-bucket }}
+        BUILD_DIR:            ${{ inputs.build-dir }}
+        CDN_DOMAIN:           ${{ inputs.cdn-domain }}
+        ASSET_DIRS:           ${{ inputs.asset-dirs }}
+        FAVICON_PATTERNS:     ${{ inputs.favicon-patterns }}
+      run: |
+        # shellcheck source=r2_sync.sh
+        "${{ github.action_path }}/r2_sync.sh"

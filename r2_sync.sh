@@ -90,16 +90,24 @@ IMMUTABLE="public, max-age=31536000, immutable"
 WEEK="public, max-age=604800"
 DAY="public, max-age=86400"
 
-sync_dir "css"    "css"    "${IMMUTABLE}"
-sync_dir "js"     "js"     "${IMMUTABLE}"
-sync_dir "fonts"  "fonts"  "${IMMUTABLE}"
-sync_dir "images" "images" "${IMMUTABLE}"
-sync_dir "og"     "og"     "${WEEK}"
+# Asset directories with immutable cache (content-hashed by Hugo)
+# Configurable via ASSET_DIRS env var (space-separated list)
+ASSET_DIRS="${ASSET_DIRS:-css js fonts images og}"
 
-sync_files "" "${DAY}" \
-  "favicon*" \
-  "apple-touch*" \
-  "site.webmanifest"
+for dir in ${ASSET_DIRS}; do
+  # og directory gets a shorter cache; all others get immutable
+  case "${dir}" in
+    og) sync_dir "${dir}" "${dir}" "${WEEK}" ;;
+    *)  sync_dir "${dir}" "${dir}" "${IMMUTABLE}" ;;
+  esac
+done
+
+# Root-level assets without content hashes (shorter cache)
+# Configurable via FAVICON_PATTERNS env var (space-separated glob patterns)
+FAVICON_PATTERNS="${FAVICON_PATTERNS:-favicon* apple-touch* site.webmanifest}"
+
+# shellcheck disable=SC2086
+sync_files "" "${DAY}" ${FAVICON_PATTERNS}
 
 # ── Smoke test ────────────────────────────────────────────────────────────────
 
