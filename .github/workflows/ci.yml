@@ -13,6 +13,18 @@ on:
 permissions:
   contents: read
 
+env:
+  NET_MATRIX_ORGANIZATION:  daplanet
+  NET_MATRIX_ORGUNIT:       dps
+  NET_MATRIX_OWNER:         FC13F74B@matrix.net
+  NET_MATRIX_CUSTOMER:      PVT-01
+  NET_MATRIX_COSTCENTER:    INT-01
+  NET_MATRIX_OID:           iso.org.dod.internet.42387
+  NET_MATRIX_DUNS:          iso.org.duns.039271257
+  NET_MATRIX_APPLICATION:   r2-asset-sync
+  NET_MATRIX_ROLE:          asset-sync
+  NET_MATRIX_ENVIRONMENT:   production
+
 jobs:
   lint:
     name: Lint
