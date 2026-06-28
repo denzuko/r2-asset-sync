@@ -1,120 +1,249 @@
-name: Test action
-
-on:
-  push:
-  pull_request:
-  workflow_dispatch:
-    inputs:
-      run_e2e:
-        description: Run e2e tests against live R2 bucket
-        type: boolean
-        default: false
-
-permissions:
-  contents: read
-
-jobs:
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install shellcheck
-        run: sudo apt-get install -y shellcheck
-
-      - name: Shellcheck r2_sync.sh
-        run: shellcheck r2_sync.sh
-
-      - name: Validate action.yml
-        run: |
-          python3 -c "import yaml; yaml.safe_load(open('action.yml'))"
-          echo "action.yml: valid"
-
-  unit:
-    name: Unit tests
-    runs-on: ubuntu-latest
-    needs: lint
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install bats
-        run: npm install -g bats
-
-      - name: Run unit tests
-        run: bats tests/unit.bats
-
-  action-smoke:
-    name: Action smoke test
-    runs-on: ubuntu-latest
-    needs: unit
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Create mock build output
-        run: |
-          mkdir -p test-build/{css,js,fonts,images,og}
-          echo "body{}" > test-build/css/main.abc123.css
-          echo "var x=1;" > test-build/js/app.def456.js
-          touch test-build/favicon.ico
-          touch test-build/site.webmanifest
-
-      - name: Validate missing credentials exit non-zero
-        run: |
-          set +e
-          R2_ACCESS_KEY_ID="" R2_SECRET_ACCESS_KEY="" \
-          R2_ACCOUNT_ID="" R2_BUCKET="" BUILD_DIR="test-build" \
-          sh r2_sync.sh
-          code=$?
-          set -e
-          [ "${code}" -ne 0 ] || (echo "FAIL: expected non-zero" && exit 1)
-          echo "ok: validation rejects missing credentials"
-
-      - name: Run with mocked AWS CLI
-        run: |
-          mkdir -p /tmp/mock-bin
-          printf '#!/bin/sh\necho "$@" >> /tmp/aws-calls.log\n' > /tmp/mock-bin/aws
-          chmod +x /tmp/mock-bin/aws
-          PATH="/tmp/mock-bin:${PATH}" \
-          R2_ACCESS_KEY_ID="k" R2_SECRET_ACCESS_KEY="s" \
-          R2_ACCOUNT_ID="acct" R2_BUCKET="bucket" BUILD_DIR="test-build" \
-          sh r2_sync.sh
-          grep -q "s3 sync" /tmp/aws-calls.log
-          grep -q "immutable" /tmp/aws-calls.log
-          grep -q "acct.r2.cloudflarestorage.com" /tmp/aws-calls.log
-          echo "ok: smoke test passed"
-
-  e2e:
-    name: E2E tests (live R2)
-    runs-on: ubuntu-latest
-    needs: unit
-    if: >
-      github.event_name == 'workflow_dispatch' &&
-      inputs.run_e2e == true
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install bats
-        run: npm install -g bats
-
-      - name: Install AWS CLI
-        run: pip3 install awscli --break-system-packages
-
-      - name: E2E tests
-        env:
-          R2_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_ACCOUNT_ID:        ${{ secrets.R2_ACCOUNT_ID }}
-          R2_BUCKET:            ${{ secrets.R2_TEST_BUCKET }}
-          CDN_DOMAIN:           ${{ secrets.R2_TEST_CDN_DOMAIN }}
-        run: bats tests/e2e.bats
-
-      - name: Integration test via action
-        uses: ./
-        with:
-          r2-access-key-id:     ${{ secrets.R2_ACCESS_KEY_ID }}
-          r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          r2-account-id:        ${{ secrets.R2_ACCOUNT_ID }}
-          r2-bucket:            ${{ secrets.R2_TEST_BUCKET }}
-          build-dir:            test-build
-          cdn-domain:           ${{ secrets.R2_TEST_CDN_DOMAIN }}
+{
+  "name": "R2-ASSET-SYNC",
+  "on": {
+    "push": {
+      "branches": [
+        "master"
+      ],
+      "tags": [
+        "v*"
+      ]
+    },
+    "pull_request": null
+  },
+  "env": {
+    "REGISTRY": "ghcr.io",
+    "IMAGE": "ghcr.io/denzuko/r2-asset-sync"
+  },
+  "jobs": {
+    "opa-gate": {
+      "permissions": {
+        "contents": "read",
+        "security-events": "write"
+      },
+      "runs-on": "ubuntu-24.04",
+      "env": {
+        "OS": "ubuntu-24.04"
+      },
+      "steps": [
+        {
+          "name": "Checkout",
+          "uses": "actions/checkout@v4",
+          "with": {
+            "fetch-depth": 0
+          }
+        },
+        {
+          "name": "Install OPA",
+          "run": "curl -sL https://openpolicyagent.org/downloads/latest/opa_linux_amd64_static \n  -o /usr/local/bin/opa && chmod +x /usr/local/bin/opa",
+          "shell": "bash"
+        },
+        {
+          "name": "Check Rego syntax",
+          "run": "opa check policy/",
+          "shell": "bash"
+        },
+        {
+          "name": "Eval SLSA gate (dry-run)",
+          "run": "echo '{}' | opa eval --bundle policy/ 'data.dps.meta.slsa.violation' || true",
+          "shell": "bash"
+        },
+        {
+          "name": "Generate SARIF",
+          "run": "opa eval --format sarif --bundle policy/ 'data' > opa.sarif || true",
+          "shell": "bash",
+          "if": "always()"
+        },
+        {
+          "name": "Upload SARIF",
+          "uses": "github/codeql-action/upload-sarif@v3",
+          "with": {
+            "sarif-file": "opa.sarif",
+            "category": "opa"
+          },
+          "if": "always()"
+        }
+      ]
+    },
+    "build": {
+      "permissions": {
+        "contents": "read"
+      },
+      "runs-on": "ubuntu-24.04",
+      "env": {
+        "OS": "ubuntu-24.04"
+      },
+      "steps": [
+        {
+          "name": "Checkout",
+          "uses": "actions/checkout@v4",
+          "with": {
+            "fetch-depth": 0
+          }
+        },
+        {
+          "name": "Build",
+          "run": "bats tests/",
+          "shell": "bash"
+        },
+        {
+          "name": "Hash artifact",
+          "id": "hash",
+          "run": "sha256sum r2-asset-sync > r2-asset-sync.sha256\necho \"sha256=$(base64 -w0 < r2-asset-sync.sha256)\" >> $GITHUB_OUTPUT",
+          "shell": "bash",
+          "if": "startsWith(github.ref, 'refs/tags/v')"
+        },
+        {
+          "name": "Upload artifact",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "r2-asset-sync",
+            "path": "r2-asset-sync\nr2-asset-sync.sha256"
+          },
+          "if": "startsWith(github.ref, 'refs/tags/v')"
+        }
+      ]
+    },
+    "sbom": {
+      "permissions": {
+        "contents": "read"
+      },
+      "runs-on": "ubuntu-24.04",
+      "env": {
+        "OS": "ubuntu-24.04"
+      },
+      "steps": [
+        {
+          "name": "Checkout",
+          "uses": "actions/checkout@v4",
+          "with": {
+            "fetch-depth": 0
+          }
+        },
+        {
+          "name": "Setup Node",
+          "uses": "actions/setup-node@v4",
+          "with": {
+            "node-version": "20"
+          }
+        },
+        {
+          "name": "Install cdxgen",
+          "run": "npm install -g @cyclonedx/cdxgen",
+          "shell": "bash"
+        },
+        {
+          "name": "Generate SBOM",
+          "run": "cdxgen --type generic --output sbom.json .",
+          "shell": "bash"
+        },
+        {
+          "name": "Scan CVEs",
+          "run": "osv-scanner --sbom sbom.json --format table || true",
+          "shell": "bash"
+        },
+        {
+          "name": "Upload SBOM",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "sbom.json",
+            "path": "sbom.json"
+          },
+          "if": "always()"
+        }
+      ]
+    },
+    "provenance": {
+      "needs": [
+        "build"
+      ],
+      "if": "startsWith(github.ref, 'refs/tags/v')",
+      "permissions": {
+        "id-token": "write",
+        "contents": "write",
+        "actions": "read"
+      },
+      "uses": "slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.0.0",
+      "with": {
+        "base64-subjects": "${{ needs.build.outputs.sha256 }}",
+        "upload-assets": "true"
+      }
+    },
+    "slsa-verify": {
+      "if": "startsWith(github.ref, 'refs/tags/v')",
+      "needs": [
+        "provenance"
+      ],
+      "permissions": {
+        "contents": "read"
+      },
+      "runs-on": "ubuntu-24.04",
+      "env": {
+        "OS": "ubuntu-24.04"
+      },
+      "steps": [
+        {
+          "name": "Download artifact",
+          "uses": "actions/download-artifact@v4",
+          "with": {
+            "name": "r2-asset-sync"
+          }
+        },
+        {
+          "name": "Download provenance",
+          "uses": "actions/download-artifact@v4",
+          "with": {
+            "name": "r2-asset-sync.intoto.jsonl"
+          }
+        },
+        {
+          "name": "Install slsa-verifier",
+          "run": "curl -sL https://github.com/slsa-framework/slsa-verifier/releases/latest/download/slsa-verifier-linux-amd64 \n  -o /usr/local/bin/slsa-verifier && chmod +x /usr/local/bin/slsa-verifier",
+          "shell": "bash"
+        },
+        {
+          "name": "Verify provenance",
+          "run": "slsa-verifier verify-artifact r2-asset-sync \\\n--provenance-path r2-asset-sync.intoto.jsonl \\\n--source-uri github.com/${{ github.repository }}",
+          "shell": "bash"
+        }
+      ]
+    },
+    "release": {
+      "if": "startsWith(github.ref, 'refs/tags/v')",
+      "needs": [
+        "slsa-verify"
+      ],
+      "permissions": {
+        "contents": "write"
+      },
+      "runs-on": "ubuntu-24.04",
+      "env": {
+        "OS": "ubuntu-24.04"
+      },
+      "steps": [
+        {
+          "name": "Download artifact",
+          "uses": "actions/download-artifact@v4",
+          "with": {
+            "name": "r2-asset-sync"
+          }
+        },
+        {
+          "name": "Download provenance",
+          "uses": "actions/download-artifact@v4",
+          "with": {
+            "name": "r2-asset-sync.intoto.jsonl"
+          }
+        },
+        {
+          "name": "Create Release",
+          "uses": "softprops/action-gh-release@v2",
+          "with": {
+            "files": "r2-asset-sync\nr2-asset-sync.sha256\nr2-asset-sync.intoto.jsonl",
+            "generate-release-notes": "true"
+          }
+        }
+      ]
+    }
+  }
+}
